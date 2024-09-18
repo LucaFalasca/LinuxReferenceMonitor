@@ -23,16 +23,39 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Luca Falasca <luca.falasca@students.uniroma2.eu>");
-MODULE_DESCRIPTION("RF file protection module");
+MODULE_DESCRIPTION("RM file protection module");
 
-#define MODNAME "RF_FILE_PROTECTION"
+#define MODNAME "RM_FILE_PROTECTION"
+
+
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
+// DEFINE HERE THE SYSTEM CALL NAMES
+#define sys0 sys0
+#define sys1 sys1
 
 unsigned long syscall_table = 0x0;
 module_param(syscall_table, ulong, 0660);
 unsigned long the_ni_syscall;
 
-unsigned long new_sys_call_array[] = {0x0, 0x0};
-#define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(unsigned long))
+typedef struct {
+    const char *name;
+    unsigned long value;
+    int entry;
+} SysCallEntry;
+
+int sys0 = -1;
+int sys1 = -1;
+
+module_param(sys0, int, 0660);
+module_param(sys1, int, 0660);
+
+SysCallEntry new_sys_call_array[] = {
+    {TOSTRING(sys0), 0x0, -1}, 
+    {TOSTRING(sys1), 0x0, -1}
+};
+#define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(SysCallEntry))
 int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 
 // SYS CALL DEFINE -------------------------------------------------------------------------------------------
@@ -79,8 +102,10 @@ int init_module(void) {
     printk("%s: initializing - hacked entries %d\n",MODNAME,HACKED_ENTRIES);
 
 
-	new_sys_call_array[0] = (unsigned long)sys_test0;
-    new_sys_call_array[1] = (unsigned long)sys_test1;
+	new_sys_call_array[0].value = (unsigned long)sys_test0;
+    new_sys_call_array[1].value = (unsigned long)sys_test1;
+
+    
 
     ret = get_entries(restore,HACKED_ENTRIES,(unsigned long*)syscall_table,&the_ni_syscall);
 
@@ -92,8 +117,13 @@ int init_module(void) {
 	unprotect_memory();
 
     for(i = 0; i < HACKED_ENTRIES; i++){
-        ((unsigned long *)syscall_table)[restore[i]] = (unsigned long)new_sys_call_array[i];
+        ((unsigned long *)syscall_table)[restore[i]] = (unsigned long)new_sys_call_array[i].value;
+        printk("%s: syscall %s with entry %d",MODNAME, new_sys_call_array[i].name, restore[i]);
+        new_sys_call_array[i].entry = restore[i];
     }
+
+    sys0 = new_sys_call_array[0].entry;
+    sys1 = new_sys_call_array[1].entry;
 
 	protect_memory();
 
