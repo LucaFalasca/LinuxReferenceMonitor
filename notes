@@ -1,0 +1,2 @@
+l'indirizzo della sys_call_table e` presente in /sys/module/the_usctm/parameters espresso in decimale
+dmesg e' il comando per accedere alllo stout del buffer del kernel (le print fatte con printk)
