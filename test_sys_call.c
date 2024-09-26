@@ -35,7 +35,8 @@ int switch_state(int param){
 }
 
 int main(int argc, char** argv){
-	switch_state(13);
+    int state = argc > 1 ? atoi(argv[1]) : 0;
+	switch_state(state);
     syscall(174, 10);
 }
 

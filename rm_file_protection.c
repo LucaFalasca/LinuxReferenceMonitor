@@ -58,14 +58,39 @@ SysCallEntry new_sys_call_array[] = {
 #define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(SysCallEntry))
 int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 
+#define OFF 0
+#define ON 1
+#define REC_ON 2
+#define REC_OFF 3
+
+int state = REC_ON;
+
+module_param(state, int, 0660);
+
 // SYS CALL DEFINE -------------------------------------------------------------------------------------------
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
-__SYSCALL_DEFINEx(1, _test0, unsigned long, param){
+__SYSCALL_DEFINEx(1, _change_state, unsigned long, param){
 #else
-asmlinkage long sys_test0(unsigned long param){
+asmlinkage long sys_change_state(unsigned long param){
 #endif
     // Content of the sys_call
-    printk("%s: sys_test0 called with param %lx\n",MODNAME,param);
+    kuid_t euid;
+    printk("%s: sys_change_state called with param %lx\n",MODNAME,param);
+    euid = current_euid();
+    printk("%s: euid %d\n",MODNAME,euid.val);
+    if(!uid_eq(euid, GLOBAL_ROOT_UID)){
+        printk("%s: only root can change the state\n",MODNAME);
+        return -1;
+    }
+    else if(param < OFF || param > REC_OFF){
+        printk("%s: invalid state\n",MODNAME);
+        return -1;
+    }
+    else{
+        state = param;
+        printk("%s: state changed to %d\n",MODNAME,state);
+    }
+    
     return 0;
 }
 
@@ -81,7 +106,7 @@ asmlinkage long sys_test1(unsigned long param){
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
-long sys_test0 = (unsigned long) __x64_sys_test0;       
+long sys_change_state = (unsigned long) __x64_sys_change_state;       
 long sys_test1 = (unsigned long) __x64_sys_test1; 
 #else
 #endif
@@ -102,7 +127,7 @@ int init_module(void) {
     printk("%s: initializing - hacked entries %d\n",MODNAME,HACKED_ENTRIES);
 
 
-	new_sys_call_array[0].value = (unsigned long)sys_test0;
+	new_sys_call_array[0].value = (unsigned long)sys_change_state;
     new_sys_call_array[1].value = (unsigned long)sys_test1;
 
     
