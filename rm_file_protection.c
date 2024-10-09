@@ -20,6 +20,65 @@
 #include <asm/io.h>
 #include <linux/syscalls.h>
 #include "lib/include/scth.h"
+#include <linux/crypto.h>
+#include <crypto/hash.h>
+#include <linux/hashtable.h>
+#include "path_hash_set.h"
+#include <linux/ktime.h>
+#include <linux/stringhash.h>
+
+int sha256(const char *data, long data_size, char *output) {
+    struct crypto_shash *tfm;
+    struct shash_desc *shash;
+    int ret, i;
+    char hash[32];
+
+    // Allocate a transformation object
+    tfm = crypto_alloc_shash("sha256", 0, 0);
+    if (IS_ERR(tfm)) {
+        return -1;
+    }
+
+    // Allocate the hash descriptor
+    shash = kmalloc(sizeof(*shash) + crypto_shash_descsize(tfm), GFP_KERNEL);
+    if (!shash) {
+        crypto_free_shash(tfm);
+        return -1;
+    }
+
+    shash->tfm = tfm;
+
+    // Initialize the hash computation
+    ret = crypto_shash_init(shash);
+    if (ret) {
+        kfree(shash);
+        crypto_free_shash(tfm);
+        return ret;
+    }
+
+    // Update with data
+    ret = crypto_shash_update(shash, data, data_size);
+    if (ret) {
+        kfree(shash);
+        crypto_free_shash(tfm);
+        return ret;
+    }
+
+    // Finalize the hash computation
+    ret = crypto_shash_final(shash, hash);
+
+    //Convert to hex
+    for (i = 0; i < 32; i++) {
+        sprintf(output + i * 2, "%02x", (unsigned char)hash[i]);
+    }
+    output[65] = '\0';
+
+    // Clean up
+    kfree(shash);
+    crypto_free_shash(tfm);
+    return ret;
+}
+
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Luca Falasca <luca.falasca@students.uniroma2.eu>");
@@ -34,6 +93,7 @@ MODULE_DESCRIPTION("RM file protection module");
 // DEFINE HERE THE SYSTEM CALL NAMES
 #define sys0 sys0
 #define sys1 sys1
+#define sys2 sys2
 
 unsigned long syscall_table = 0x0;
 module_param(syscall_table, ulong, 0660);
@@ -47,13 +107,16 @@ typedef struct {
 
 int sys0 = -1;
 int sys1 = -1;
+int sys2 = -1;
 
-module_param(sys0, int, 0660);
-module_param(sys1, int, 0660);
+module_param(sys0, int, 0664);
+module_param(sys1, int, 0664);
+module_param(sys2, int, 0664);
 
 SysCallEntry new_sys_call_array[] = {
     {TOSTRING(sys0), 0x0, -1}, 
-    {TOSTRING(sys1), 0x0, -1}
+    {TOSTRING(sys1), 0x0, -1},
+    {TOSTRING(sys2), 0x0, -1}
 };
 #define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(SysCallEntry))
 int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
@@ -66,6 +129,8 @@ int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 int state = REC_ON;
 
 module_param(state, int, 0660);
+char rm_password[128];
+module_param_string(rm_password, rm_password, 128, 0664);
 
 // SYS CALL DEFINE -------------------------------------------------------------------------------------------
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
@@ -95,21 +160,77 @@ asmlinkage long sys_change_state(unsigned long param){
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
-__SYSCALL_DEFINEx(1, _test1, unsigned long, param){
+__SYSCALL_DEFINEx(2, _protect_path, char *, param, char *, password){
 #else
-asmlinkage long sys_test1(unsigned long param){
+asmlinkage long sys_protect_path(char *param, char *password){
 #endif
     // Content of the sys_call
-    printk("%s: sys_test1 called with param %lx\n",MODNAME,param);
+    char *kpassword;
+
+    kpassword = kmalloc(128, GFP_KERNEL);
+    if(copy_from_user(kpassword, password, 128))
+    {
+            printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
+            kfree(kpassword);
+            return -1;
+    }
+    printk("%s: the user password is %s\n",MODNAME, kpassword);
+    sha256(kpassword, strlen(kpassword), kpassword);
+
+    if (strcmp(kpassword, rm_password) == 0){
+        printk("%s: password correct\n",MODNAME);
+    }
+    else{
+        printk("%s: password incorrect\n",MODNAME);
+    }
+
+    hashset_add(param);
+    printk("%s: path %s is now protected\n",MODNAME, param);
+
+    return 0;
+}
+
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
+__SYSCALL_DEFINEx(2, _unprotect_path, char *, param, char *, password){
+#else
+asmlinkage long sys_unprotect_path(char *param, char *password){
+#endif
+    // Content of the sys_call
+    char *kpassword;
+
+    kpassword = kmalloc(128, GFP_KERNEL);
+    if(copy_from_user(kpassword, password, 128))
+    {
+            printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
+            kfree(kpassword);
+            return -1;
+    }
+    printk("%s: the user password is %s\n",MODNAME, kpassword);
+    sha256(kpassword, strlen(kpassword), kpassword);
+
+    if (strcmp(kpassword, rm_password) == 0){
+        printk("%s: password correct\n",MODNAME);
+    }
+    else{
+        printk("%s: password incorrect\n",MODNAME);
+    }
+
+    hashset_remove(param);
+    printk("%s: path %s is now unprotected\n",MODNAME, param);
+
     return 0;
 }
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
 long sys_change_state = (unsigned long) __x64_sys_change_state;       
-long sys_test1 = (unsigned long) __x64_sys_test1; 
+long sys_protect_path = (unsigned long) __x64_sys_protect_path; 
+long sys_unprotect_path = (unsigned long) __x64_sys_unprotect_path;
 #else
 #endif
+
+
 
 // MODULE INIT -------------------------------------------------------------------------------------------
 
@@ -117,6 +238,15 @@ int init_module(void) {
 
     int i;
     int ret;
+    char *string;
+
+    if (strlen(rm_password) == 0){
+        printk("%s: password not inserted\n",MODNAME);
+        return -1;
+    }
+
+    sha256(rm_password, strlen(rm_password), rm_password);
+    printk("%s: the hashed password is %s\n", MODNAME, rm_password);
 
 	if (syscall_table == 0x0){
         printk("%s: cannot manage sys_call_table address set to 0x0\n",MODNAME);
@@ -126,9 +256,9 @@ int init_module(void) {
     printk("%s: the module received sys_call_table address %px\n",MODNAME,(void*)syscall_table);
     printk("%s: initializing - hacked entries %d\n",MODNAME,HACKED_ENTRIES);
 
-
 	new_sys_call_array[0].value = (unsigned long)sys_change_state;
-    new_sys_call_array[1].value = (unsigned long)sys_test1;
+    new_sys_call_array[1].value = (unsigned long)sys_protect_path;
+    new_sys_call_array[2].value = (unsigned long)sys_unprotect_path;
 
     
 
@@ -149,10 +279,25 @@ int init_module(void) {
 
     sys0 = new_sys_call_array[0].entry;
     sys1 = new_sys_call_array[1].entry;
+    sys2 = new_sys_call_array[2].entry;
 
 	protect_memory();
 
     printk("%s: all new system-calls correctly installed on sys-call table\n",MODNAME);
+
+    hashset_init();
+
+    string = "Esempio di stringa";
+    hashset_add(string);
+    string = "Esempio di stringa 2";
+    ret = hashset_contains(string);
+    if (ret == 1){
+        printk("%s: string %s is in the hashset\n",MODNAME, string);
+    }
+    else{
+        printk("%s: string %s is not in the hashset\n",MODNAME, string);
+    }
+
 
     return 0;
 
@@ -164,6 +309,9 @@ void cleanup_module(void) {
     int i;
             
     printk("%s: shutting down\n",MODNAME);
+
+    hashset_cleanup();
+    printk("%s: hashset cleaned\n",MODNAME);
 
 	unprotect_memory();
     for(i = 0; i < HACKED_ENTRIES; i++){
