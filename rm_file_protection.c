@@ -86,6 +86,7 @@ MODULE_DESCRIPTION("RM file protection module");
 
 #define MODNAME "RM_FILE_PROTECTION"
 
+#define MAX_FILENAME_LEN 512
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -230,7 +231,49 @@ long sys_unprotect_path = (unsigned long) __x64_sys_unprotect_path;
 #else
 #endif
 
+static int security_file_open_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    struct path *path;
+    struct file *file;
+    struct dentry *dentry;
+    char *buff;
+    char *pathname;
+    int flags;
 
+    file = (struct file *)regs->di;
+
+    flags = file->f_flags;
+    if ((flags & O_WRONLY) || (flags & O_RDWR) || (flags & O_TRUNC) || (flags & O_APPEND)){
+        path = &file->f_path;
+        dentry = path->dentry;
+
+        buff = (char *)kmalloc(GFP_KERNEL, MAX_FILENAME_LEN);
+        if (!buff) {
+                printk("%s: [ERROR] could not allocate memory for buffer\n", MODNAME);
+                return 1;
+        }
+        pathname = dentry_path_raw(dentry, buff, MAX_FILENAME_LEN);
+        if (IS_ERR(pathname)) {
+                printk("%s: [ERROR] could not get path from dentry\n", MODNAME);
+                kfree(buff);
+                return 1;
+        }
+        if (hashset_contains(pathname) == 1){
+            printk("%s: file %s is protected\n", MODNAME, pathname);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int security_file_open_post_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    regs->ax = (-EACCES);
+    printk("%s: blocco l'accesso\n",MODNAME);
+    return 0;
+}
+
+
+
+static struct kretprobe krp_open;
 
 // MODULE INIT -------------------------------------------------------------------------------------------
 
@@ -239,6 +282,7 @@ int init_module(void) {
     int i;
     int ret;
     char *string;
+    struct file *file;
 
     if (strlen(rm_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
@@ -287,8 +331,9 @@ int init_module(void) {
 
     hashset_init();
 
-    string = "Esempio di stringa";
+    string = "/home/luca/Documents/prova_protezione.txt";
     hashset_add(string);
+    printk("%s: string %s is added to the protected paths\n",MODNAME, string);
     string = "Esempio di stringa 2";
     ret = hashset_contains(string);
     if (ret == 1){
@@ -298,6 +343,59 @@ int init_module(void) {
         printk("%s: string %s is not in the hashset\n",MODNAME, string);
     }
 
+    krp_open.kp.symbol_name = "security_file_open";
+    krp_open.entry_handler = (kretprobe_handler_t)security_file_open_entry_handler;
+    krp_open.handler = (kretprobe_handler_t)security_file_open_post_handler;
+    ret = register_kretprobe(&krp_open);
+
+    //open the file in write mode
+    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_WRONLY, 0);
+    if (IS_ERR(file)) {
+        printk("%s: [ERROR] could not open file\n", MODNAME);
+    }
+    else{
+        printk("%s: file opened correctly\n",MODNAME);
+         //close the file
+        filp_close(file, NULL);
+    }
+    //apro il file in tutti gli altri modi di strcittura
+    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_RDWR, 0);
+    if (IS_ERR(file)) {
+        printk("%s: [ERROR] could not open file\n", MODNAME);
+    }
+    else{
+        printk("%s: file opened correctly\n",MODNAME);
+        filp_close(file, NULL);
+    }
+    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_TRUNC, 0);
+    if (IS_ERR(file)) {
+        printk("%s: [ERROR] could not open file\n", MODNAME);
+    }
+    else{
+        printk("%s: file opened correctly\n",MODNAME);
+        //close the file
+        filp_close(file, NULL);
+    }
+    
+    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_APPEND, 0);
+    if (IS_ERR(file)) {
+        printk("%s: [ERROR] could not open file\n", MODNAME);
+    }
+    else{
+        printk("%s: file opened correctly\n",MODNAME);
+        //close the file
+        filp_close(file, NULL);
+    }
+    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_RDONLY, 0);
+    if (IS_ERR(file)) {
+        printk("%s: [ERROR] could not open file\n", MODNAME);
+    }
+    else{
+        printk("%s: file opened correctly\n",MODNAME);
+        //close the file
+        filp_close(file, NULL);
+    }
+    
 
     return 0;
 
@@ -309,6 +407,9 @@ void cleanup_module(void) {
     int i;
             
     printk("%s: shutting down\n",MODNAME);
+
+    unregister_kretprobe(&krp_open);
+    printk("%s: probes unregistered\n",MODNAME);
 
     hashset_cleanup();
     printk("%s: hashset cleaned\n",MODNAME);
