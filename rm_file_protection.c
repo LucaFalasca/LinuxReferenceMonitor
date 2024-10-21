@@ -25,7 +25,7 @@
 #include <linux/hashtable.h>
 #include "path_hash_set.h"
 #include <linux/ktime.h>
-#include <linux/stringhash.h>
+#include <linux/namei.h>
 
 int sha256(const char *data, long data_size, char *output) {
     struct crypto_shash *tfm;
@@ -126,6 +126,8 @@ int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 #define ON 1
 #define REC_ON 2
 #define REC_OFF 3
+
+#define block_access regs->ax = (-EACCES)
 
 int state = REC_ON;
 
@@ -231,49 +233,138 @@ long sys_unprotect_path = (unsigned long) __x64_sys_unprotect_path;
 #else
 #endif
 
+
+static struct kretprobe krp_open;
+
 static int security_file_open_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
-    struct path *path;
     struct file *file;
-    struct dentry *dentry;
-    char *buff;
-    char *pathname;
     int flags;
+    unsigned long inode_id;
 
     file = (struct file *)regs->di;
 
     flags = file->f_flags;
     if ((flags & O_WRONLY) || (flags & O_RDWR) || (flags & O_TRUNC) || (flags & O_APPEND)){
-        path = &file->f_path;
-        dentry = path->dentry;
-
-        buff = (char *)kmalloc(GFP_KERNEL, MAX_FILENAME_LEN);
-        if (!buff) {
-                printk("%s: [ERROR] could not allocate memory for buffer\n", MODNAME);
-                return 1;
-        }
-        pathname = dentry_path_raw(dentry, buff, MAX_FILENAME_LEN);
-        if (IS_ERR(pathname)) {
-                printk("%s: [ERROR] could not get path from dentry\n", MODNAME);
-                kfree(buff);
-                return 1;
-        }
-        if (hashset_contains(pathname) == 1){
-            printk("%s: file %s is protected\n", MODNAME, pathname);
+        inode_id = file->f_path.dentry->d_inode->i_ino;
+        if(hashset_contains_int(inode_id)){
+            printk("%s: inode id is protected %lu\n",MODNAME,inode_id);
             return 0;
         }
     }
     return 1;
 }
 
-static int security_file_open_post_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
-    regs->ax = (-EACCES);
+static int block_access_post_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    block_access;
     printk("%s: blocco l'accesso\n",MODNAME);
     return 0;
 }
 
 
+static struct kretprobe krp_rename;
 
-static struct kretprobe krp_open;
+static int security_file_rename_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    struct dentry *new_dentry;
+    struct dentry *old_dentry;
+    struct inode *new_dir;
+    struct inode *old_dir;
+    unsigned long inode_id;
+
+    old_dir = (struct inode *)regs->di;
+    old_dentry = (struct dentry *)regs->si;
+    new_dir = (struct inode *)regs->dx;
+    new_dentry = (struct dentry *)regs->cx;
+
+    if(new_dentry->d_inode != NULL){
+        inode_id = new_dentry->d_inode->i_ino;
+    
+        if(hashset_contains_int(inode_id)){
+            printk("%s: you can't rename a file as a protected file",MODNAME);
+            return 0;
+        }
+    }
+
+    if(old_dentry->d_inode != NULL){
+        inode_id = old_dentry->d_inode->i_ino;
+    
+        if(hashset_contains_int(inode_id)){
+            printk("%s: you can't rename a protected file",MODNAME);
+            return 0;
+        }
+    }
+
+    inode_id = new_dir->i_ino;
+
+    if(hashset_contains_int(inode_id)){
+        printk("%s: you can't rename a file in a protected directory",MODNAME);
+        return 0;
+    }
+
+
+    inode_id = old_dir->i_ino;
+
+    if(hashset_contains_int(inode_id)){
+        printk("%s: you can't rename a file in a protected directory",MODNAME);
+        return 0;
+    }
+
+    return 1;
+}
+
+static struct kretprobe krp_link;
+
+static int security_inode_link_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    struct dentry *old_dentry;
+    struct inode *dir;
+    struct dentry *new_dentry;
+    unsigned long dir_inode_id;
+
+    old_dentry = (struct dentry *)regs->di;
+    dir = (struct inode *)regs->si;
+    new_dentry = (struct dentry *)regs->dx;
+
+    dir_inode_id = dir->i_ino;
+    if(hashset_contains_int(dir_inode_id)){
+        printk("%s: you can't create a file in a protected directory",MODNAME);
+        return 0;
+    }
+    return 1;
+}
+
+static struct kretprobe krp_symlink;
+static struct kretprobe krp_mkdir;
+static struct kretprobe krp_mknode;
+static struct kretprobe krp_create;
+static struct kretprobe krp_unlink;
+static struct kretprobe krp_rmdir;
+
+static int security_inode_dir_ops_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    struct inode *dir;
+    unsigned long dir_inode_id;
+    unsigned long file_inode_id;
+    struct dentry *dentry;
+
+    dir = (struct inode *)regs->di;
+    dentry = (struct dentry *)regs->si;
+
+
+    dir_inode_id = dir->i_ino;
+    if (dentry->d_inode == NULL)
+        return 1;
+
+    file_inode_id = dentry->d_inode->i_ino;
+
+    if(hashset_contains_int(dir_inode_id)){
+        printk("%s: you can't operate in a protected directory with node_id %lu",MODNAME, dir_inode_id);
+        return 0;
+    }
+    if(hashset_contains_int(file_inode_id)){
+        printk("%s: you can't operate in a protected file with node_id %lu",MODNAME, file_inode_id);
+        return 0;
+    }
+    return 1;
+}
+
 
 // MODULE INIT -------------------------------------------------------------------------------------------
 
@@ -282,7 +373,8 @@ int init_module(void) {
     int i;
     int ret;
     char *string;
-    struct file *file;
+    struct path path;
+    unsigned long inode_id;
 
     if (strlen(rm_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
@@ -331,11 +423,22 @@ int init_module(void) {
 
     hashset_init();
 
-    string = "/home/luca/Documents/prova_protezione.txt";
-    hashset_add(string);
+    string = "/home/luca/Documents/prova_folder";
+    //hashset_add(string);
+    kern_path(string, LOOKUP_FOLLOW, &path);
+    inode_id = path.dentry->d_inode->i_ino;
+    printk("%s: inode idddd %lu\n",MODNAME,inode_id);
+    hashset_add_int(inode_id);
+
+    string = "/home/luca/Documents/prova_folder/a.txt";
+    kern_path(string, LOOKUP_FOLLOW, &path);
+    inode_id = path.dentry->d_inode->i_ino;
+    printk("%s: inode id a.txt file: %lu\n",MODNAME,inode_id);
+
+
     printk("%s: string %s is added to the protected paths\n",MODNAME, string);
     string = "Esempio di stringa 2";
-    ret = hashset_contains(string);
+    ret = hashset_contains_int(1969749);
     if (ret == 1){
         printk("%s: string %s is in the hashset\n",MODNAME, string);
     }
@@ -345,11 +448,88 @@ int init_module(void) {
 
     krp_open.kp.symbol_name = "security_file_open";
     krp_open.entry_handler = (kretprobe_handler_t)security_file_open_entry_handler;
-    krp_open.handler = (kretprobe_handler_t)security_file_open_post_handler;
+    krp_open.handler = (kretprobe_handler_t)block_access_post_handler;
     ret = register_kretprobe(&krp_open);
 
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_open\n", MODNAME);
+    }
+    
+    krp_rename.kp.symbol_name = "security_inode_rename";
+    krp_rename.entry_handler = (kretprobe_handler_t)security_file_rename_entry_handler;
+    krp_rename.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_rename);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_rename\n", MODNAME);
+    }
+
+    krp_link.kp.symbol_name = "security_inode_link";
+    krp_link.entry_handler = (kretprobe_handler_t)security_inode_link_entry_handler;
+    krp_link.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_link);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_link\n", MODNAME);
+    }
+
+    krp_symlink.kp.symbol_name = "security_inode_symlink";
+    krp_symlink.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_symlink.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_symlink);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_symlink\n", MODNAME);
+    }
+
+    krp_unlink.kp.symbol_name = "security_inode_unlink";
+    krp_unlink.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_unlink.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_unlink);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_unlink\n", MODNAME);
+    }
+
+    krp_mkdir.kp.symbol_name = "security_inode_mkdir";
+    krp_mkdir.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_mkdir.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_mkdir);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_mkdir\n", MODNAME);
+    }
+
+    krp_rmdir.kp.symbol_name = "security_inode_rmdir";
+    krp_rmdir.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_rmdir.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_rmdir);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_rmdir\n", MODNAME);
+    }
+
+    krp_mknode.kp.symbol_name = "security_inode_mknod";
+    krp_mknode.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_mknode.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_mknode);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_mknode\n", MODNAME);
+    }
+
+    krp_create.kp.symbol_name = "security_inode_create";
+    krp_create.entry_handler = (kretprobe_handler_t)security_inode_dir_ops_entry_handler;
+    krp_create.handler = (kretprobe_handler_t)block_access_post_handler;
+    ret = register_kretprobe(&krp_create);
+
+    if (ret < 0) {
+        printk("%s: [ERROR] register_kretprobe failed for krp_create\n", MODNAME);
+    }
+
+    /*
     //open the file in write mode
-    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_WRONLY, 0);
+    file = filp_open("/home/luca/Documents/prova_folder", O_WRONLY, 0);
     if (IS_ERR(file)) {
         printk("%s: [ERROR] could not open file\n", MODNAME);
     }
@@ -395,6 +575,7 @@ int init_module(void) {
         //close the file
         filp_close(file, NULL);
     }
+    */
     
 
     return 0;
@@ -409,6 +590,15 @@ void cleanup_module(void) {
     printk("%s: shutting down\n",MODNAME);
 
     unregister_kretprobe(&krp_open);
+    unregister_kretprobe(&krp_rename);
+    unregister_kretprobe(&krp_link);
+    unregister_kretprobe(&krp_symlink);
+    unregister_kretprobe(&krp_unlink);
+    unregister_kretprobe(&krp_mkdir);
+    unregister_kretprobe(&krp_rmdir);
+    unregister_kretprobe(&krp_mknode);
+    unregister_kretprobe(&krp_create);
+
     printk("%s: probes unregistered\n",MODNAME);
 
     hashset_cleanup();

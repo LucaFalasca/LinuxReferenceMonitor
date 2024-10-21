@@ -49,6 +49,7 @@ int hashset_contains(char *path) {
     return 0; // Chiave non trovata
 }
 
+
 // Funzione per rimuovere un elemento
 void hashset_remove(char *path) {
     struct hashset_node *node;
@@ -58,6 +59,47 @@ void hashset_remove(char *path) {
     hash_for_each_possible_rcu(my_hashset, node, node, key) {
         if (node->key == key) {
             hash_del_rcu(&node->node); // Rimuovi dal set
+            kfree(node); // Libera la memoria
+            return;
+        }
+    }
+}
+
+// Funzione per aggiungere un elemento
+void hashset_add_int(unsigned long key) {
+    struct hashset_node *new_node;
+
+    // Alloca memoria per il nuovo nodo
+    new_node = kmalloc(sizeof(struct hashset_node), GFP_KERNEL);
+    if (!new_node) {
+        printk(KERN_ERR "Errore nell'allocazione della memoria\n");
+        return;
+    }
+    
+    new_node->key = key; // Imposta la chiave
+    hash_add_rcu(my_hashset, &new_node->node, key); // Aggiungi l'elemento
+}
+
+// Funzione per controllare se un elemento esiste
+int hashset_contains_int(unsigned long key) {
+    struct hashset_node *node;
+
+    // Itera sui bucket per trovare la chiave
+    hash_for_each_possible_rcu(my_hashset, node, node, key) {
+        if (node->key == key) {
+            return 1; // Chiave trovata
+        }
+    }
+    return 0; // Chiave non trovata
+}
+
+
+// Funzione per rimuovere un elemento
+void hashset_remove_int(unsigned long key) {
+    struct hashset_node *node;
+
+    hash_for_each_possible_rcu(my_hashset, node, node, key) {
+        if (node->key == key) {
             kfree(node); // Libera la memoria
             return;
         }
@@ -78,5 +120,15 @@ void hashset_cleanup(void) {
     hash_for_each_rcu(my_hashset, bkt, node, node) {
         hash_del(&node->node); // Rimuovi il nodo
         kfree(node); // Libera la memoria
+    }
+}
+
+void hashet_print(void) {
+    struct hashset_node *node;
+    int bkt;
+
+    // Itera su tutti i bucket e stampa la chiave
+    hash_for_each_rcu(my_hashset, bkt, node, node) {
+        printk(KERN_INFO "Chiave: %d\n", node->key);
     }
 }
