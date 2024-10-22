@@ -26,58 +26,9 @@
 #include "path_hash_set.h"
 #include <linux/ktime.h>
 #include <linux/namei.h>
+#include "rm_file_protection.h"
 
-int sha256(const char *data, long data_size, char *output) {
-    struct crypto_shash *tfm;
-    struct shash_desc *shash;
-    int ret, i;
-    char hash[32];
 
-    // Allocate a transformation object
-    tfm = crypto_alloc_shash("sha256", 0, 0);
-    if (IS_ERR(tfm)) {
-        return -1;
-    }
-
-    // Allocate the hash descriptor
-    shash = kmalloc(sizeof(*shash) + crypto_shash_descsize(tfm), GFP_KERNEL);
-    if (!shash) {
-        crypto_free_shash(tfm);
-        return -1;
-    }
-
-    shash->tfm = tfm;
-
-    // Initialize the hash computation
-    ret = crypto_shash_init(shash);
-    if (ret) {
-        kfree(shash);
-        crypto_free_shash(tfm);
-        return ret;
-    }
-
-    // Update with data
-    ret = crypto_shash_update(shash, data, data_size);
-    if (ret) {
-        kfree(shash);
-        crypto_free_shash(tfm);
-        return ret;
-    }
-
-    // Finalize the hash computation
-    ret = crypto_shash_final(shash, hash);
-
-    //Convert to hex
-    for (i = 0; i < 32; i++) {
-        sprintf(output + i * 2, "%02x", (unsigned char)hash[i]);
-    }
-    output[65] = '\0';
-
-    // Clean up
-    kfree(shash);
-    crypto_free_shash(tfm);
-    return ret;
-}
 
 
 MODULE_LICENSE("GPL");
@@ -155,6 +106,12 @@ asmlinkage long sys_change_state(unsigned long param){
         return -1;
     }
     else{
+        if(param == REC_ON || param == ON){
+            enable_kprobes();
+        }
+        else if(param == REC_OFF || param == OFF){
+            disable_kprobes();
+        }
         state = param;
         printk("%s: state changed to %d\n",MODNAME,state);
     }
@@ -169,6 +126,8 @@ asmlinkage long sys_protect_path(char *param, char *password){
 #endif
     // Content of the sys_call
     char *kpassword;
+    struct path path;
+    unsigned long inode_id;
 
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
@@ -185,10 +144,19 @@ asmlinkage long sys_protect_path(char *param, char *password){
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
+        return 2;
     }
 
-    hashset_add(param);
-    printk("%s: path %s is now protected\n",MODNAME, param);
+    if (state == REC_OFF || state == REC_ON){
+        kern_path(param, LOOKUP_FOLLOW, &path);
+        inode_id = path.dentry->d_inode->i_ino;
+        hashset_add_int(inode_id);
+        printk("%s: path %s is now protected\n",MODNAME, param);
+    }
+    else{
+        printk("%s: the module is not in the right state to protect a path\n",MODNAME);
+        return 1;
+    }
 
     return 0;
 }
@@ -201,13 +169,15 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
 #endif
     // Content of the sys_call
     char *kpassword;
+    struct path path;
+    unsigned long inode_id;
 
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(kpassword);
-            return -1;
+            return 1;
     }
     printk("%s: the user password is %s\n",MODNAME, kpassword);
     sha256(kpassword, strlen(kpassword), kpassword);
@@ -217,10 +187,18 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
+        return 2;
     }
 
-    hashset_remove(param);
-    printk("%s: path %s is now unprotected\n",MODNAME, param);
+    if(state == REC_OFF || state == REC_ON){
+        kern_path(param, LOOKUP_FOLLOW, &path);
+        inode_id = path.dentry->d_inode->i_ino;
+        hashset_remove_int(inode_id);
+        printk("%s: path %s is now unprotected\n",MODNAME, param);
+    }else{
+        printk("%s: the module is not in the right state to unprotect a path\n",MODNAME);
+        return 1;
+    }
 
     return 0;
 }
@@ -363,6 +341,14 @@ static int security_inode_dir_ops_entry_handler(struct kretprobe_instance *ri, s
         return 0;
     }
     return 1;
+}
+
+int enable_kprobes(){
+    return 0;
+}
+
+int disable_kprobes(){
+    return 0;
 }
 
 
@@ -610,4 +596,56 @@ void cleanup_module(void) {
     }
 	protect_memory();
     printk("%s: sys-call table restored to its original content\n",MODNAME);
+}
+
+int sha256(const char *data, long data_size, char *output) {
+    struct crypto_shash *tfm;
+    struct shash_desc *shash;
+    int ret, i;
+    char hash[32];
+
+    // Allocate a transformation object
+    tfm = crypto_alloc_shash("sha256", 0, 0);
+    if (IS_ERR(tfm)) {
+        return -1;
+    }
+
+    // Allocate the hash descriptor
+    shash = kmalloc(sizeof(*shash) + crypto_shash_descsize(tfm), GFP_KERNEL);
+    if (!shash) {
+        crypto_free_shash(tfm);
+        return -1;
+    }
+
+    shash->tfm = tfm;
+
+    // Initialize the hash computation
+    ret = crypto_shash_init(shash);
+    if (ret) {
+        kfree(shash);
+        crypto_free_shash(tfm);
+        return ret;
+    }
+
+    // Update with data
+    ret = crypto_shash_update(shash, data, data_size);
+    if (ret) {
+        kfree(shash);
+        crypto_free_shash(tfm);
+        return ret;
+    }
+
+    // Finalize the hash computation
+    ret = crypto_shash_final(shash, hash);
+
+    //Convert to hex
+    for (i = 0; i < 32; i++) {
+        sprintf(output + i * 2, "%02x", (unsigned char)hash[i]);
+    }
+    output[65] = '\0';
+
+    // Clean up
+    kfree(shash);
+    crypto_free_shash(tfm);
+    return ret;
 }
