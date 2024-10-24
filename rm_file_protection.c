@@ -81,9 +81,11 @@ int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
 #define block_access regs->ax = (-EACCES)
 
 int state = REC_ON;
+spinlock_t state_lock;
 
 module_param(state, int, 0660);
 char rm_password[128];
+spinlock_t password_lock;
 module_param_string(rm_password, rm_password, 128, 0664);
 
 // SYS CALL DEFINE -------------------------------------------------------------------------------------------
@@ -106,6 +108,7 @@ asmlinkage long sys_change_state(unsigned long param){
         return -1;
     }
     else{
+        spin_lock(&state_lock);
         if(param == REC_ON || param == ON){
             enable_kprobes();
         }
@@ -113,6 +116,7 @@ asmlinkage long sys_change_state(unsigned long param){
             disable_kprobes();
         }
         state = param;
+        spin_unlock(&state_lock);
         printk("%s: state changed to %d\n",MODNAME,state);
     }
     
@@ -139,6 +143,7 @@ asmlinkage long sys_protect_path(char *param, char *password){
     printk("%s: the user password is %s\n",MODNAME, kpassword);
     sha256(kpassword, strlen(kpassword), kpassword);
 
+    spin_lock(&password_lock);
     if (strcmp(kpassword, rm_password) == 0){
         printk("%s: password correct\n",MODNAME);
     }
@@ -146,6 +151,7 @@ asmlinkage long sys_protect_path(char *param, char *password){
         printk("%s: password incorrect\n",MODNAME);
         return 2;
     }
+    spin_unlock(&password_lock);
 
     if (state == REC_OFF || state == REC_ON){
         kern_path(param, LOOKUP_FOLLOW, &path);
@@ -182,6 +188,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     printk("%s: the user password is %s\n",MODNAME, kpassword);
     sha256(kpassword, strlen(kpassword), kpassword);
 
+    spin_lock(&password_lock);
     if (strcmp(kpassword, rm_password) == 0){
         printk("%s: password correct\n",MODNAME);
     }
@@ -189,6 +196,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
         printk("%s: password incorrect\n",MODNAME);
         return 2;
     }
+    spin_unlock(&password_lock);
 
     if(state == REC_OFF || state == REC_ON){
         kern_path(param, LOOKUP_FOLLOW, &path);
@@ -234,6 +242,7 @@ static int security_file_open_entry_handler(struct kretprobe_instance *ri, struc
 
 static int block_access_post_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
     block_access;
+    put_deferred_work();
     printk("%s: blocco l'accesso\n",MODNAME);
     return 0;
 }
@@ -247,6 +256,7 @@ static int security_file_rename_entry_handler(struct kretprobe_instance *ri, str
     struct inode *new_dir;
     struct inode *old_dir;
     unsigned long inode_id;
+
 
     old_dir = (struct inode *)regs->di;
     old_dentry = (struct dentry *)regs->si;
@@ -344,13 +354,164 @@ static int security_inode_dir_ops_entry_handler(struct kretprobe_instance *ri, s
 }
 
 int enable_kprobes(){
+    enable_kretprobe(&krp_open);
+    enable_kretprobe(&krp_rename);
+    enable_kretprobe(&krp_link);
+    enable_kretprobe(&krp_symlink);
+    enable_kretprobe(&krp_unlink);
+    enable_kretprobe(&krp_mkdir);
+    enable_kretprobe(&krp_rmdir);
+    enable_kretprobe(&krp_mknode);
+    enable_kretprobe(&krp_create);
+    printk("%s: probes enabled\n",MODNAME);
     return 0;
 }
 
 int disable_kprobes(){
+    disable_kretprobe(&krp_open);
+    disable_kretprobe(&krp_rename);
+    disable_kretprobe(&krp_link);
+    disable_kretprobe(&krp_symlink);
+    disable_kretprobe(&krp_unlink);
+    disable_kretprobe(&krp_mkdir);
+    disable_kretprobe(&krp_rmdir);
+    disable_kretprobe(&krp_mknode);
+    disable_kretprobe(&krp_create);
+    printk("%s: probes disabled\n",MODNAME);
     return 0;
 }
 
+typedef struct _packed_work{
+        void* buffer;
+        __kernel_time64_t ts;
+        int tgid;
+        int tid;
+        int uid;
+        int euid;
+        char *prog_path;
+        struct work_struct the_work;
+} packed_work;
+
+int put_deferred_work(void){
+    packed_work *the_task;
+    struct timespec64 ts;
+    struct dentry *dentry;
+    char buff[512];
+    char *path;
+
+    if(!try_module_get(THIS_MODULE)) return -ENODEV;
+
+    the_task = kzalloc(sizeof(packed_work),GFP_ATOMIC);//non blocking memory allocation
+
+    if (the_task == NULL) {
+            printk("%s: tasklet buffer allocation failure\n",MODNAME);
+            module_put(THIS_MODULE);
+            return -1;
+    }
+    ktime_get_real_ts64(&ts);
+
+    the_task->buffer = the_task;
+    the_task->ts = ts.tv_sec;
+    the_task->tgid = current->tgid;
+    the_task->tid = current->pid;
+    the_task->uid = current_uid().val;
+    the_task->euid = current_euid().val;
+    dentry = current->mm->exe_file->f_path.dentry;
+    path = kmalloc(MAX_FILENAME_LEN, GFP_KERNEL);
+    path = dentry_path_raw(dentry, buff, MAX_FILENAME_LEN);
+    if(IS_ERR(path)){
+        printk("%s: [ERROR] could not get the path of the executable\n",MODNAME);
+    }
+    printk("%s: the path of the executable is %s\n",MODNAME,path);
+    the_task->prog_path = kstrdup(path, GFP_KERNEL);
+
+    printk("%s: the path of the executable is %s\n",MODNAME,the_task->prog_path);
+
+    __INIT_WORK(&(the_task->the_work),(void*)update_access_denied_log,(unsigned long)(&(the_task->the_work)));
+
+    schedule_work(&the_task->the_work);
+    printk("%s: deferred work scheduled\n",MODNAME);
+    return 0;
+}
+
+void update_access_denied_log(unsigned long data){
+    packed_work *the_task;
+    struct file *sffs_file;
+    struct file *malicious_file;
+    int ret;
+    char output[512];
+    int len;
+    char prog_cont_hash[65];
+    char *prog_cont;
+    int file_size;
+
+
+    printk("%s: I'm in the deferred work\n",MODNAME);
+
+    the_task = container_of((void*)data,packed_work,the_work);
+
+    strcpy(prog_cont_hash, "N/A");
+    printk("%s: the path of the executable is %s\n",MODNAME,the_task->prog_path);
+    malicious_file = filp_open(the_task->prog_path, O_RDONLY, 0);
+    if (IS_ERR(malicious_file)) {
+        printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(malicious_file));
+    }
+    else{
+        printk("%s: malicious file opened correctly \n",MODNAME);
+        file_size = malicious_file->f_inode->i_size;
+        printk("%s: file size %d\n",MODNAME,file_size);
+        prog_cont = kmalloc(file_size + 1, GFP_KERNEL);
+        if(prog_cont == NULL){
+            printk("%s: [ERROR] could not allocate memory for the file content\n",MODNAME);
+        }else{
+            ret = kernel_read(malicious_file, prog_cont, file_size, 0);
+            if(ret < 0){
+                printk("%s: [ERROR] could not read from malicious file\n", MODNAME);
+            }
+            else{
+                printk("%s: malicious file read correctly\n",MODNAME);
+                printk("%s: ret %d\n",MODNAME,ret);
+                printk("%s: the content of the file is %s\n",MODNAME,prog_cont);
+                printk("%s: sizeof(progcont) %ld\n",MODNAME,sizeof(prog_cont));
+                sha256(prog_cont, ret, prog_cont_hash);
+                printk("%s: the hash of the content is %s\n",MODNAME,prog_cont_hash);
+            }
+        }
+        filp_close(malicious_file, NULL);
+    }
+    
+    printk("%s: I'll write the code in the log\n",MODNAME);
+    memset(output, 0, 512);
+    
+    len = snprintf(NULL, 0, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
+    if(len > 512){
+        printk("%s: [ERROR] buffer too small\n",MODNAME);
+        return;
+    }
+    printk("%s: len %d\n",MODNAME,len);
+    snprintf(output, len, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
+    sffs_file = filp_open("/home/luca/LinuxReferenceMonitor/singlefile-FS/mount/access_denied_log.csv", O_WRONLY, 0644);
+    if (IS_ERR(sffs_file)) {
+        printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(sffs_file));
+    }
+    else{
+        printk("%s: file opened correctly \n",MODNAME);
+        ret = kernel_write(sffs_file, output, len - 1, 0);
+        if(ret < 0){
+            printk("%s: [ERROR] could not write to file\n", MODNAME);
+        }
+        else{
+            printk("%s: file written correctly\n",MODNAME);
+        }
+        //close the file
+        filp_close(sffs_file, NULL);
+    }
+
+    kfree(the_task);
+    kfree(prog_cont);
+    printk("%s: deferred work completed\n",MODNAME);
+    module_put(THIS_MODULE);
+}
 
 // MODULE INIT -------------------------------------------------------------------------------------------
 
@@ -361,6 +522,7 @@ int init_module(void) {
     char *string;
     struct path path;
     unsigned long inode_id;
+    struct file *sffs_file;
 
     if (strlen(rm_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
@@ -562,7 +724,26 @@ int init_module(void) {
         filp_close(file, NULL);
     }
     */
-    
+
+    /*
+    sffs_file = filp_open("./singlefile-FS/mount/the-file", O_WRONLY, 0644);
+    if (IS_ERR(sffs_file)) {
+        printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(sffs_file));
+    }
+    else{
+        printk("%s: file opened correctly \n",MODNAME);
+        ret = kernel_write(sffs_file, "prova", 5, 0);
+        if(ret < 0){
+            printk("%s: [ERROR] could not write to file\n", MODNAME);
+        }
+        else{
+            printk("%s: file written correctly\n",MODNAME);
+        }
+        //close the file
+        filp_close(sffs_file, NULL);
+    }
+    */
+    //put_deferred_work();
 
     return 0;
 
@@ -609,16 +790,13 @@ int sha256(const char *data, long data_size, char *output) {
     if (IS_ERR(tfm)) {
         return -1;
     }
-
     // Allocate the hash descriptor
     shash = kmalloc(sizeof(*shash) + crypto_shash_descsize(tfm), GFP_KERNEL);
     if (!shash) {
         crypto_free_shash(tfm);
         return -1;
     }
-
     shash->tfm = tfm;
-
     // Initialize the hash computation
     ret = crypto_shash_init(shash);
     if (ret) {
@@ -634,16 +812,13 @@ int sha256(const char *data, long data_size, char *output) {
         crypto_free_shash(tfm);
         return ret;
     }
-
     // Finalize the hash computation
     ret = crypto_shash_final(shash, hash);
-
     //Convert to hex
     for (i = 0; i < 32; i++) {
         sprintf(output + i * 2, "%02x", (unsigned char)hash[i]);
     }
     output[65] = '\0';
-
     // Clean up
     kfree(shash);
     crypto_free_shash(tfm);
