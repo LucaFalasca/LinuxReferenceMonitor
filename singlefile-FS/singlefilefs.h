@@ -3,7 +3,6 @@
 
 #include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/mutex.h>
 
 
 #define MOD_NAME "SINGLE FILE FS"
@@ -22,12 +21,13 @@
 
 #define UNIQUE_FILE_NAME "access_denied_log.csv"
 
+extern struct mutex mutex;
+
 //inode definition
 struct onefilefs_inode {
 	mode_t mode;//not exploited
 	uint64_t inode_no;
 	uint64_t data_block_number;//not exploited
-	struct mutex i_mutex;
 
 	union {
 		uint64_t file_size;

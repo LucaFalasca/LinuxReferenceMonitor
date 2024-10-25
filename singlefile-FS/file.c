@@ -13,6 +13,7 @@
 #include <linux/mutex.h>
 
 
+
 ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t * off) {
 
     struct buffer_head *bh = NULL;
@@ -129,10 +130,17 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
     uint64_t file_size = the_inode->i_size;
     int ret, len, offset, block_to_write;
     size_t write_len = iov_iter_count(from);
+    struct onefilefs_inode *FS_specific_inode;
 
     printk("%s: write operation called with len %ld - and offset %lld (the current file size is %lld)", MOD_NAME, write_len, *off, file_size);
+    
+    bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
+    if(!bh){
+		return -EIO;
+    }
+	FS_specific_inode = (struct onefilefs_inode*)bh->b_data;
 
-    mutex_lock(&(the_inode->i_mutex));
+    mutex_lock(&mutex);
     // Aggiorna l'offset all'inizio della scrittura in append (fine del file)
     *off = file_size;
 
@@ -150,15 +158,17 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
     // Leggi il blocco in cui scrivere
     bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_write);
     if (!bh) {
-        mutex_unlock(&(the_inode->i_mutex));
+        mutex_unlock(&mutex);
         return -EIO;
     }
+
+
 
     // Copia i dati forniti dall'utente nel buffer
     ret = copy_from_iter(bh->b_data + offset, len, from);
     if (ret != len) {
         brelse(bh);
-        mutex_unlock(&(the_inode->i_mutex));
+        mutex_unlock(&mutex);
         return -EFAULT;
     }
 
@@ -172,7 +182,7 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
 
     // Sincronizza le modifiche
     mark_inode_dirty(the_inode);
-    mutex_unlock(&(the_inode->i_mutex));
+    mutex_unlock(&mutex);
     
 
     return ret;

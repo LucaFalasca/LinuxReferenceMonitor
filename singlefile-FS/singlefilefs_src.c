@@ -19,7 +19,7 @@ static struct super_operations singlefilefs_super_ops = {
 static struct dentry_operations singlefilefs_dentry_ops = {
 };
 
-
+struct mutex mutex;
 
 int singlefilefs_fill_super(struct super_block *sb, void *data, int silent) {   
 
@@ -75,6 +75,7 @@ int singlefilefs_fill_super(struct super_block *sb, void *data, int silent) {
     // no inode from device is needed - the root of our file system is an in memory object
     root_inode->i_private = NULL;
 
+
     sb->s_root = d_make_root(root_inode);
     if (!sb->s_root)
         return -ENOMEM;
@@ -127,7 +128,8 @@ static int singlefilefs_init(void) {
         printk("%s: sucessfully registered singlefilefs\n",MOD_NAME);
     else
         printk("%s: failed to register singlefilefs - error %d", MOD_NAME,ret);
-
+    
+    mutex_init(&mutex);
     return ret;
 }
 
@@ -142,6 +144,8 @@ static void singlefilefs_exit(void) {
         printk("%s: sucessfully unregistered file system driver\n",MOD_NAME);
     else
         printk("%s: failed to unregister singlefilefs driver - error %d", MOD_NAME, ret);
+
+    mutex_destroy(&mutex);
 }
 
 module_init(singlefilefs_init);

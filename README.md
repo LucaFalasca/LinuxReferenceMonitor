@@ -7,8 +7,7 @@ To use this module, you first need to install [this another Linux Kernel Module]
 ## How to mount
 To mount this module you need to:
 1. open a shell in main directory of the module
-2. execute the command ```make```
-3. execute the command ```make mount```
+2. execute the command ```sudo bash load.sh <rm_password>```
 
 ## How to unmount
 To mount this module you need to:

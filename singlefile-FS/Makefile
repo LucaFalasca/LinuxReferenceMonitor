@@ -1,5 +1,5 @@
 obj-m += singlefilefs.o
-singlefilefs-objs += singlefilefs_src.o file.o dir.o
+singlefilefs-objs += singlefilefs_src.o file.o dir.o 
 
 all:
 	gcc singlefilemakefs.c -o singlefilemakefs

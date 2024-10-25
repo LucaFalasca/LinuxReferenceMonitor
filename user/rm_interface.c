@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h> 
+#include <string.h>
 
 int get_sys_call_entry(char *entry_path){
     int fd = open(entry_path, O_RDONLY);
@@ -18,7 +19,7 @@ int get_sys_call_entry(char *entry_path){
     }
     buffer[bytesRead] = '\0';
     close(fd);
-    printf("number: %d\n", atoi(buffer));
+    //printf("number: %d\n", atoi(buffer));
     int sys_call_entry = atoi(buffer);
     return sys_call_entry;
 }
@@ -53,24 +54,64 @@ int unprotect_path(char *path, char *password){
     return 0;
 }
 
+int change_password(char *old_password, char *new_password){
+    int entry = get_sys_call_entry("/sys/module/the_rm_file_protection/parameters/sys3");
+    if(entry == -1){
+        printf("Error getting sys call entry\n");
+        return -1;
+    }
+    printf("entry: %d\n", entry);
+    int ret = syscall(entry, old_password, new_password);
+    printf("ret: %d\n", ret);   
+    return 0;
+}
+
+int get_state(){
+    int entry = get_sys_call_entry("/sys/module/the_rm_file_protection/parameters/state");
+    if(entry == -1){
+        printf("Error getting sys call entry\n");
+        return -1;
+    }
+    return entry;
+}
+
 int main(int argc, char** argv){
     int scelta;
     char *input_password;
+    char *new_password;
+    char *password;
     char path[128];
     int ret;
     int stop = 0;
+    int state;
+
+    if (getuid() != 0) {
+        printf("The program must be launched with administrator privileges\n");
+        exit(1);
+    } 
 
     while (!stop) {
         scelta = -1;
         // Stampa del menu
-        printf("\n--- Menu Operazioni ---\n");
+        printf("\nCurrent state:");
+        state = get_state();
+        if(state == 0){
+            printf(" OFF\n");
+        }else if(state == 1){
+            printf(" ON\n");
+        }else if(state == 2){
+            printf(" REC_ON\n");
+        }else if(state == 3){
+            printf(" REC_OFF\n");
+        }
+        printf("\n--- Operation Menu ---\n");
         printf("1. Change state\n");
         printf("2. Protect file\n");
         printf("3. Unprotect file\n");
+        printf("4. Change password\n");
         printf("0. Exit\n");
         printf("Choose operation: ");
         scanf("%d", &scelta);
-
         switch (scelta) {
             case 1:
                 printf("Available states: \n");
@@ -125,6 +166,21 @@ int main(int argc, char** argv){
                     printf("Error reading path\n");
                 }
                 break;
+
+            case 4:
+                password = getpass("Insert old password: ");
+                input_password = malloc(strlen(password) + 1);
+                strcpy(input_password, password);
+                password = getpass("Insert new password: ");
+                new_password = malloc(strlen(password) + 1);
+                strcpy(new_password, password);
+                printf("input_password: %s\n", input_password);
+                printf("new_password: %s\n", new_password);
+                ret = change_password(input_password, new_password);
+                if(ret == -1){
+                    printf("Error changing password\n");
+                }
+                break;
             case 0:
                 printf("Exiting...\n");
                 stop = 1;
@@ -132,6 +188,10 @@ int main(int argc, char** argv){
             default:
                 printf("Choose not valid, try again.\n");
         }
+        printf("Press enter to continue...");
+        getchar();
+        getchar();
+        system("clear");
     }
 
     return 0;

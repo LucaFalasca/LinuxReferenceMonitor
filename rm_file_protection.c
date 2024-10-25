@@ -46,6 +46,7 @@ MODULE_DESCRIPTION("RM file protection module");
 #define sys0 sys0
 #define sys1 sys1
 #define sys2 sys2
+#define sys3 sys3
 
 unsigned long syscall_table = 0x0;
 module_param(syscall_table, ulong, 0660);
@@ -60,15 +61,18 @@ typedef struct {
 int sys0 = -1;
 int sys1 = -1;
 int sys2 = -1;
+int sys3 = -1;
 
 module_param(sys0, int, 0664);
 module_param(sys1, int, 0664);
 module_param(sys2, int, 0664);
+module_param(sys3, int, 0664);
 
 SysCallEntry new_sys_call_array[] = {
     {TOSTRING(sys0), 0x0, -1}, 
     {TOSTRING(sys1), 0x0, -1},
-    {TOSTRING(sys2), 0x0, -1}
+    {TOSTRING(sys2), 0x0, -1},
+    {TOSTRING(sys3), 0x0, -1}
 };
 #define HACKED_ENTRIES (int)(sizeof(new_sys_call_array)/sizeof(SysCallEntry))
 int restore[HACKED_ENTRIES] = {[0 ... (HACKED_ENTRIES-1)] -1};
@@ -109,10 +113,10 @@ asmlinkage long sys_change_state(unsigned long param){
     }
     else{
         spin_lock(&state_lock);
-        if(param == REC_ON || param == ON){
+        if((param == REC_ON || param == ON) && (state == REC_OFF || state == OFF)){
             enable_kprobes();
         }
-        else if(param == REC_OFF || param == OFF){
+        else if((param == REC_OFF || param == OFF) && (state == REC_ON || state == ON)){
             disable_kprobes();
         }
         state = param;
@@ -211,11 +215,55 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     return 0;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
+__SYSCALL_DEFINEx(2, _change_password, char *, old_password, char *, new_password){
+#else
+asmlinkage long sys_change_password(char *old_password, char *new_password){
+#endif
+    char *kold_password, *knew_password;
+
+    kold_password = kmalloc(128, GFP_KERNEL);
+    knew_password = kmalloc(128, GFP_KERNEL);
+    if(copy_from_user(kold_password, old_password, 128))
+    {
+            printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
+            kfree(kold_password);
+            return 1;
+    }
+    if(copy_from_user(knew_password, new_password, 128))
+    {
+            printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
+            kfree(knew_password);
+            return 1;
+    }
+    printk("%s: the user old password is %s\n",MODNAME, kold_password);
+    printk("%s: the user new password is %s\n",MODNAME, knew_password);
+    sha256(kold_password, strlen(kold_password), kold_password);
+
+    spin_lock(&password_lock);
+    if (strcmp(kold_password, rm_password) == 0){
+        printk("%s: password correct\n",MODNAME);
+    }
+    else{
+        printk("%s: password incorrect\n",MODNAME);
+        return 2;
+    }
+    if (strlen(knew_password) == 0){
+        printk("%s: password not inserted\n",MODNAME);
+        return -1;
+    }
+
+    sha256(knew_password, strlen(knew_password), rm_password);
+    spin_unlock(&password_lock);
+    return 0;
+}
+
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
 long sys_change_state = (unsigned long) __x64_sys_change_state;       
 long sys_protect_path = (unsigned long) __x64_sys_protect_path; 
 long sys_unprotect_path = (unsigned long) __x64_sys_unprotect_path;
+long sys_change_password = (unsigned long) __x64_sys_change_password;
 #else
 #endif
 
@@ -241,8 +289,8 @@ static int security_file_open_entry_handler(struct kretprobe_instance *ri, struc
 }
 
 static int block_access_post_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+    //put_deferred_work();
     block_access;
-    put_deferred_work();
     printk("%s: blocco l'accesso\n",MODNAME);
     return 0;
 }
@@ -306,6 +354,7 @@ static int security_inode_link_entry_handler(struct kretprobe_instance *ri, stru
     struct inode *dir;
     struct dentry *new_dentry;
     unsigned long dir_inode_id;
+    unsigned long file_inode_id;
 
     old_dentry = (struct dentry *)regs->di;
     dir = (struct inode *)regs->si;
@@ -314,6 +363,16 @@ static int security_inode_link_entry_handler(struct kretprobe_instance *ri, stru
     dir_inode_id = dir->i_ino;
     if(hashset_contains_int(dir_inode_id)){
         printk("%s: you can't create a file in a protected directory",MODNAME);
+        return 0;
+    }
+    file_inode_id = new_dentry->d_inode->i_ino;
+    if(hashset_contains_int(file_inode_id)){
+        printk("%s: you can't create a protected file",MODNAME);
+        return 0;
+    }
+    file_inode_id = old_dentry->d_inode->i_ino;
+    if(hashset_contains_int(file_inode_id)){
+        printk("%s: you can't create a link to a protected file",MODNAME);
         return 0;
     }
     return 1;
@@ -337,15 +396,17 @@ static int security_inode_dir_ops_entry_handler(struct kretprobe_instance *ri, s
 
 
     dir_inode_id = dir->i_ino;
-    if (dentry->d_inode == NULL)
-        return 1;
-
-    file_inode_id = dentry->d_inode->i_ino;
 
     if(hashset_contains_int(dir_inode_id)){
         printk("%s: you can't operate in a protected directory with node_id %lu",MODNAME, dir_inode_id);
         return 0;
     }
+
+    if (dentry->d_inode == NULL)
+        return 1;
+
+    file_inode_id = dentry->d_inode->i_ino;
+
     if(hashset_contains_int(file_inode_id)){
         printk("%s: you can't operate in a protected file with node_id %lu",MODNAME, file_inode_id);
         return 0;
@@ -470,9 +531,6 @@ void update_access_denied_log(unsigned long data){
             }
             else{
                 printk("%s: malicious file read correctly\n",MODNAME);
-                printk("%s: ret %d\n",MODNAME,ret);
-                printk("%s: the content of the file is %s\n",MODNAME,prog_cont);
-                printk("%s: sizeof(progcont) %ld\n",MODNAME,sizeof(prog_cont));
                 sha256(prog_cont, ret, prog_cont_hash);
                 printk("%s: the hash of the content is %s\n",MODNAME,prog_cont_hash);
             }
@@ -480,7 +538,7 @@ void update_access_denied_log(unsigned long data){
         filp_close(malicious_file, NULL);
     }
     
-    printk("%s: I'll write the code in the log\n",MODNAME);
+    printk("%s: I'll write the info in the log\n",MODNAME);
     memset(output, 0, 512);
     
     len = snprintf(NULL, 0, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
@@ -522,7 +580,6 @@ int init_module(void) {
     char *string;
     struct path path;
     unsigned long inode_id;
-    struct file *sffs_file;
 
     if (strlen(rm_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
@@ -543,6 +600,8 @@ int init_module(void) {
 	new_sys_call_array[0].value = (unsigned long)sys_change_state;
     new_sys_call_array[1].value = (unsigned long)sys_protect_path;
     new_sys_call_array[2].value = (unsigned long)sys_unprotect_path;
+    new_sys_call_array[3].value = (unsigned long)sys_change_password;
+
 
     
 
@@ -564,6 +623,7 @@ int init_module(void) {
     sys0 = new_sys_call_array[0].entry;
     sys1 = new_sys_call_array[1].entry;
     sys2 = new_sys_call_array[2].entry;
+    sys3 = new_sys_call_array[3].entry;
 
 	protect_memory();
 
@@ -577,11 +637,17 @@ int init_module(void) {
     inode_id = path.dentry->d_inode->i_ino;
     printk("%s: inode idddd %lu\n",MODNAME,inode_id);
     hashset_add_int(inode_id);
+    if(hashset_contains_int(inode_id)){
+        printk("%s: inode id is in the hashset\n",MODNAME);
+    }
+    else{
+        printk("%s: inode id is not in the hashset\n",MODNAME);
+    }
 
     string = "/home/luca/Documents/prova_folder/a.txt";
     kern_path(string, LOOKUP_FOLLOW, &path);
-    inode_id = path.dentry->d_inode->i_ino;
-    printk("%s: inode id a.txt file: %lu\n",MODNAME,inode_id);
+    //inode_id = path.dentry->d_inode->i_ino;
+    //printk("%s: inode id a.txt file: %lu\n",MODNAME,inode_id);
 
 
     printk("%s: string %s is added to the protected paths\n",MODNAME, string);
@@ -674,77 +740,6 @@ int init_module(void) {
     if (ret < 0) {
         printk("%s: [ERROR] register_kretprobe failed for krp_create\n", MODNAME);
     }
-
-    /*
-    //open the file in write mode
-    file = filp_open("/home/luca/Documents/prova_folder", O_WRONLY, 0);
-    if (IS_ERR(file)) {
-        printk("%s: [ERROR] could not open file\n", MODNAME);
-    }
-    else{
-        printk("%s: file opened correctly\n",MODNAME);
-         //close the file
-        filp_close(file, NULL);
-    }
-    //apro il file in tutti gli altri modi di strcittura
-    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_RDWR, 0);
-    if (IS_ERR(file)) {
-        printk("%s: [ERROR] could not open file\n", MODNAME);
-    }
-    else{
-        printk("%s: file opened correctly\n",MODNAME);
-        filp_close(file, NULL);
-    }
-    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_TRUNC, 0);
-    if (IS_ERR(file)) {
-        printk("%s: [ERROR] could not open file\n", MODNAME);
-    }
-    else{
-        printk("%s: file opened correctly\n",MODNAME);
-        //close the file
-        filp_close(file, NULL);
-    }
-    
-    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_APPEND, 0);
-    if (IS_ERR(file)) {
-        printk("%s: [ERROR] could not open file\n", MODNAME);
-    }
-    else{
-        printk("%s: file opened correctly\n",MODNAME);
-        //close the file
-        filp_close(file, NULL);
-    }
-    file = filp_open("/home/luca/Documents/prova_protezione.txt", O_RDONLY, 0);
-    if (IS_ERR(file)) {
-        printk("%s: [ERROR] could not open file\n", MODNAME);
-    }
-    else{
-        printk("%s: file opened correctly\n",MODNAME);
-        //close the file
-        filp_close(file, NULL);
-    }
-    */
-
-    /*
-    sffs_file = filp_open("./singlefile-FS/mount/the-file", O_WRONLY, 0644);
-    if (IS_ERR(sffs_file)) {
-        printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(sffs_file));
-    }
-    else{
-        printk("%s: file opened correctly \n",MODNAME);
-        ret = kernel_write(sffs_file, "prova", 5, 0);
-        if(ret < 0){
-            printk("%s: [ERROR] could not write to file\n", MODNAME);
-        }
-        else{
-            printk("%s: file written correctly\n",MODNAME);
-        }
-        //close the file
-        filp_close(sffs_file, NULL);
-    }
-    */
-    //put_deferred_work();
-
     return 0;
 
 }
