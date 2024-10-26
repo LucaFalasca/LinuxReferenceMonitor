@@ -25,3 +25,6 @@ unmount:
 
 load_fs:
 	sudo bash load_fs.sh
+
+unload_fs:
+	sudo bash unload_fs.sh
