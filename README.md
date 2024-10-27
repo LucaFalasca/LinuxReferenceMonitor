@@ -23,3 +23,7 @@ To unmount this module you need to:
 Do it only if you don't need anymore the logfile:
 1. open a shell in main directory of the module
 2. execute the command ```make unload_fs```
+
+
+## How to use
+Go in the user directory and execute the command ```make run``` for a client.
