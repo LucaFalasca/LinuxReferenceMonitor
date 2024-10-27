@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
     }
     
     // Test the removing of the file
-    printf("Removing file test: ");
+    printf("Removing file test:\t");
     ret = remove(file_path);
     if(ret == -1){
         printf("Test passed\n");
@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the writing of the file
-    printf("Writing file test: ");
+    printf("Writing file test:\t");
     fd = open(file_path, O_WRONLY | O_CREAT, 0666);
     if(fd == -1){
         printf("Test passed\n");
@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the renaming of the file
-    printf("Renaming file test: ");
+    printf("Renaming file test:\t");
     strcpy(new_file_path, file_path);
     strcat(new_file_path, "_new");
     ret = rename(file_path, new_file_path);
@@ -78,7 +78,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the unlinking of the file
-    printf("Unlinking file test: ");
+    printf("Unlinking file test:\t");
     ret = unlink(file_path);
     if(ret == -1){
         printf("Test passed\n");
@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
 
 
     // Test the writing on existing symlink of the file
-    printf("symlink file test: ");
+    printf("symlink file test:\t");
     fd = open(symlink_path, O_WRONLY | O_CREAT, 0666);
     if(fd == -1){
         printf("Test passed\n");
@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
     }
     
     // Test the writing on existing hardlink of the file
-    printf("hardlink file test: ");
+    printf("hardlink file test:\t");
     fd = open(hardlink_path, O_WRONLY | O_CREAT, 0666);
     if(fd == -1){
         printf("Test passed\n");
@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
 
     
     // Test the removing of the folder
-    printf("Removing folder test: ");
+    printf("Removing folder test:\t");
     ret = remove(folder_path);
     if(ret == -1){
         printf("Test passed\n");
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the writing of the folder
-    printf("Writing folder test: ");
+    printf("Writing folder test:\t");
     fd = open(folder_path, O_WRONLY | O_CREAT, 0666);
     if(fd == -1){
         printf("Test passed\n");
@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the renaming of the folder
-    printf("Renaming folder test: ");
+    printf("Renaming folder test:\t");
     char new_folder_path[128];
     strcpy(new_folder_path, folder_path);
     strcat(new_folder_path, "/new_folder");
@@ -157,7 +157,7 @@ int main(int argc, char *argv[])
     }
 
     // Test the unlinking of the folder
-    printf("Unlinking folder test: ");
+    printf("Unlinking folder test:\t");
     ret = unlink(folder_path);
     if(ret == -1){
         printf("Test passed\n");
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
     }
 
     // Create a new file in the folder
-    printf("Creating new file test: ");
+    printf("Creating file test:\t");
     fd = open(new_file_path, O_WRONLY | O_CREAT, 0666);
     if(fd == -1){
         printf("Test passed\n");
@@ -177,7 +177,7 @@ int main(int argc, char *argv[])
     }
 
     // Delete a file in the folder
-    printf("Deleting file test: ");
+    printf("Deleting file test:\t");
     ret = unlink(new_file_path);
     if(ret == -1){
         printf("Test passed\n");
@@ -187,7 +187,7 @@ int main(int argc, char *argv[])
     } 
 
     // Create a new folder in the folder
-    printf("Creating new folder test: ");
+    printf("Creating folder test:\t");
     ret = mkdir(new_folder_path, 0777);
     if(ret == -1){
         printf("Test passed\n");
@@ -197,7 +197,7 @@ int main(int argc, char *argv[])
     }
 
     // Delete a folder in the folder
-    printf("Deleting folder test: ");
+    printf("Deleting folder test:\t");
     ret = rmdir(folder_inside_path);
     if(ret == -1){
         printf("Test passed\n");

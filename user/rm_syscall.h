@@ -24,8 +24,7 @@ int switch_state(int param){
         printf("Error getting sys call entry\n");
         return -1;
     }
-    syscall(entry, param);
-    return 0;
+    return syscall(entry, param);
 }
 
 int protect_path(char *path, char* password){
@@ -34,8 +33,7 @@ int protect_path(char *path, char* password){
         printf("Error getting sys call entry\n");
         return -1;
     }
-    syscall(entry, path, password);
-    return 0;
+    return syscall(entry, path, password);
 }
 
 int unprotect_path(char *path, char *password){
@@ -44,8 +42,7 @@ int unprotect_path(char *path, char *password){
         printf("Error getting sys call entry\n");
         return -1;
     }
-    syscall(entry, path, password);
-    return 0;
+    return syscall(entry, path, password);
 }
 
 int change_password(char *old_password, char *new_password){
@@ -54,10 +51,7 @@ int change_password(char *old_password, char *new_password){
         printf("Error getting sys call entry\n");
         return -1;
     }
-    printf("entry: %d\n", entry);
-    int ret = syscall(entry, old_password, new_password);
-    printf("ret: %d\n", ret);   
-    return 0;
+    return syscall(entry, old_password, new_password);
 }
 
 int get_state(){

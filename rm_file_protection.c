@@ -29,6 +29,7 @@
 #include "rm_file_protection.h"
 #include "hookes.h"
 #include "deferred_log.h"
+#include "rm_error.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Luca Falasca <luca.falasca@students.uniroma2.eu>");
@@ -98,11 +99,11 @@ asmlinkage long sys_change_state(unsigned long param){
     euid = current_euid();
     if(!uid_eq(euid, GLOBAL_ROOT_UID)){
         printk("%s: only root can change the state\n",MODNAME);
-        return -1;
+        return -GENERIC_ERROR;
     }
     else if(param < OFF || param > REC_OFF){
         printk("%s: invalid state\n",MODNAME);
-        return -1;
+        return -INVALID_STATE;
     }
     else{
         spin_lock(&state_lock);
@@ -136,7 +137,7 @@ asmlinkage long sys_protect_path(char *param, char *password){
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(kpassword);
-            return -1;
+            return -GENERIC_ERROR;
     }
     sha256(kpassword, strlen(kpassword), kpassword);
 
@@ -147,38 +148,32 @@ asmlinkage long sys_protect_path(char *param, char *password){
     else{
         printk("%s: password incorrect\n",MODNAME);
         kfree(kpassword);
-        return 2;
+        return -WRONG_PASSWORD;
     }
     spin_unlock(&password_lock);
     kfree(kpassword);
 
     if (state == REC_OFF || state == REC_ON){
-        printk("%s: 1\n",MODNAME);
         ret = kern_path(param, LOOKUP_FOLLOW, &path);
-        printk("%s: 2\n",MODNAME);
         if(ret < 0){
             printk("%s: error trying to access the path\n",MODNAME);
-            return 1;
+            return -WRONG_PATH;
         }
         if(path.dentry->d_inode == NULL){
             printk("%s: path %s does not exist\n",MODNAME, param);
-            return 1;
+            return -WRONG_PATH;
         }
         inode_id = path.dentry->d_inode->i_ino;
-        printk("%s: 3\n",MODNAME);
-        printk("%s: inode id %lu\n",MODNAME,inode_id);
         if(hashset_contains_int(inode_id)){
             printk("%s: path %s is already protected\n",MODNAME, param);
-            return 1;
+            return -ALREADY_PROTECTED_NOT_PROTECTED;
         }
-        printk("%s: 4\n",MODNAME);
         hashset_add_int(inode_id);
-        printk("%s: 5\n",MODNAME);
         printk("%s: path %s is now protected\n",MODNAME, param);
     }
     else{
         printk("%s: the module is not in the right state to protect a path\n",MODNAME);
-        return 1;
+        return -INVALID_STATE;
     }
 
     return 0;
@@ -201,7 +196,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(kpassword);
-            return 1;
+            return -GENERIC_ERROR;
     }
     sha256(kpassword, strlen(kpassword), kpassword);
 
@@ -212,7 +207,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     else{
         printk("%s: password incorrect\n",MODNAME);
         kfree(kpassword);
-        return 2;
+        return -WRONG_PASSWORD;
     }
     spin_unlock(&password_lock);
     kfree(kpassword);
@@ -221,22 +216,22 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
         ret = kern_path(param, LOOKUP_FOLLOW, &path);
         if(ret < 0){
             printk("%s: error trying to access the path\n",MODNAME);
-            return 1;
+            return -WRONG_PATH;
         }
         if(path.dentry->d_inode == NULL){
             printk("%s: path %s does not exist\n",MODNAME, param);
-            return 1;
+            return -WRONG_PATH;
         }
         inode_id = path.dentry->d_inode->i_ino;
         if(!hashset_contains_int(inode_id)){
             printk("%s: path %s is not protected\n",MODNAME, param);
-            return 1;
+            return -ALREADY_PROTECTED_NOT_PROTECTED;
         }
         hashset_remove_int(inode_id);
         printk("%s: path %s is now unprotected\n",MODNAME, param);
     }else{
         printk("%s: the module is not in the right state to unprotect a path\n",MODNAME);
-        return 1;
+        return -INVALID_STATE;
     }
 
     return 0;
@@ -255,13 +250,13 @@ asmlinkage long sys_change_password(char *old_password, char *new_password){
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(kold_password);
-            return 1;
+            return -GENERIC_ERROR;
     }
     if(copy_from_user(knew_password, new_password, 128))
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(knew_password);
-            return 1;
+            return -GENERIC_ERROR;
     }
     sha256(kold_password, strlen(kold_password), kold_password);
 
@@ -271,11 +266,11 @@ asmlinkage long sys_change_password(char *old_password, char *new_password){
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
-        return 2;
+        return -WRONG_PASSWORD;
     }
     if (strlen(knew_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
-        return -1;
+        return -PASSWORD_NOT_INSERTED;
     }
 
     sha256(knew_password, strlen(knew_password), rm_password);

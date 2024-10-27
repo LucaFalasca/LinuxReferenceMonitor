@@ -79,7 +79,7 @@ void update_access_denied_log(unsigned long data){
         }else{
             ret = kernel_read(malicious_file, prog_cont, file_size, 0);
             if(ret < 0){
-                printk("%s: [ERROR] could not read from malicious file\n", MODNAME);
+                printk("%s: could not read from malicious file\n", MODNAME);
             }
             else{
                 sha256(prog_cont, ret, prog_cont_hash);
@@ -93,21 +93,29 @@ void update_access_denied_log(unsigned long data){
     len = snprintf(NULL, 0, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
     if(len > 512){
         printk("%s: [ERROR] buffer too small\n",MODNAME);
+        kfree(the_task);
+        kfree(prog_cont);
         module_put(THIS_MODULE);
         return;
     }
-    printk("%s: len %d\n",MODNAME,len);
     snprintf(output, len, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
     
     sffs_file = filp_open(LOG_PATH, O_WRONLY, 0644);
     if (IS_ERR(sffs_file)) {
-        printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(sffs_file));
+        printk("%s: [ERROR] could not open file with error value %ld, the file system may not be mounted, or it may be mounted in the wrong folder\n", MODNAME, PTR_ERR(sffs_file));
+        kfree(the_task);
+        kfree(prog_cont);
+        module_put(THIS_MODULE);
+        return;
     }
     else{
         printk("%s: file opened correctly \n",MODNAME);
         ret = kernel_write(sffs_file, output, len - 1, 0);
         if(ret < 0){
             printk("%s: [ERROR] could not write to file\n", MODNAME);
+            kfree(the_task);
+            kfree(prog_cont);
+            module_put(THIS_MODULE);
         }
         else{
             printk("%s: file written correctly\n",MODNAME);

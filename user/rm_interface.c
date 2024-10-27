@@ -54,6 +54,7 @@ int main(int argc, char** argv){
                 ret = switch_state(scelta);
                 if(ret == -1){
                     printf("Error changing state\n");
+                    break;
                 }else{
                     printf("State changed to");
                     if(scelta == 0){
@@ -73,14 +74,16 @@ int main(int argc, char** argv){
                 ret = scanf("%s", path);
                 if(ret == 1){
                     ret = protect_path(path, input_password);
-                    if(ret == -1){
+                    if(ret < 0){
                         printf("Error protecting path\n");
+                        break;
                     }
                 }
                 else{
                     printf("Error reading path\n");
+                    break;
                 }
-                
+                printf("Path %s protected\n", path);
                 break;
             case 3:
                 input_password = getpass("Insert password: ");
@@ -88,13 +91,16 @@ int main(int argc, char** argv){
                 ret = scanf("%s", path);
                 if(ret == 1){
                     ret = unprotect_path(path, input_password);
-                    if(ret == -1){
+                    if(ret < 0){
                         printf("Error deprotecting path\n");
+                        break;
                     }
                 }
                 else{
                     printf("Error reading path\n");
+                    break;
                 }
+                printf("Path %s unprotected\n", path);
                 break;
 
             case 4:
@@ -104,12 +110,12 @@ int main(int argc, char** argv){
                 password = getpass("Insert new password: ");
                 new_password = malloc(strlen(password) + 1);
                 strcpy(new_password, password);
-                printf("input_password: %s\n", input_password);
-                printf("new_password: %s\n", new_password);
                 ret = change_password(input_password, new_password);
-                if(ret == -1){
+                if(ret < 0){
                     printf("Error changing password\n");
+                    break;
                 }
+                printf("Password changed\n");
                 break;
             case 0:
                 printf("Exiting...\n");
