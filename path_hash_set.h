@@ -11,7 +11,7 @@
 // Definizione della struttura del nostro hash set
 struct hashset_node {
     struct hlist_node node; // Node per la lista collegata
-    int key;                // Chiave da memorizzare
+    unsigned long key;                // Chiave da memorizzare
 };
 
 // Creazione dell'hash set
@@ -83,7 +83,6 @@ void hashset_add_int(unsigned long key) {
 // Funzione per controllare se un elemento esiste
 int hashset_contains_int(unsigned long key) {
     struct hashset_node *node;
-
     // Itera sui bucket per trovare la chiave
     hash_for_each_possible_rcu(my_hashset, node, node, key) {
         if (node->key == key) {
@@ -100,6 +99,7 @@ void hashset_remove_int(unsigned long key) {
 
     hash_for_each_possible_rcu(my_hashset, node, node, key) {
         if (node->key == key) {
+            hash_del_rcu(&node->node); // Rimuovi dal set
             kfree(node); // Libera la memoria
             return;
         }
@@ -118,17 +118,17 @@ void hashset_cleanup(void) {
 
     // Itera su tutti i bucket e libera la memoria
     hash_for_each_rcu(my_hashset, bkt, node, node) {
-        hash_del(&node->node); // Rimuovi il nodo
+        hash_del_rcu(&node->node); // Rimuovi il nodo
         kfree(node); // Libera la memoria
     }
 }
-
+/*
 void hashet_print(void) {
     struct hashset_node *node;
     int bkt;
 
     // Itera su tutti i bucket e stampa la chiave
     hash_for_each_rcu(my_hashset, bkt, node, node) {
-        printk(KERN_INFO "Chiave: %d\n", node->key);
+        printk(KERN_INFO "Chiave: lu\n", node->key);
     }
-}
+}*/

@@ -129,6 +129,7 @@ asmlinkage long sys_protect_path(char *param, char *password){
     char *kpassword;
     struct path path;
     unsigned long inode_id;
+    int ret;
 
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
@@ -145,14 +146,34 @@ asmlinkage long sys_protect_path(char *param, char *password){
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
+        kfree(kpassword);
         return 2;
     }
     spin_unlock(&password_lock);
+    kfree(kpassword);
 
     if (state == REC_OFF || state == REC_ON){
-        kern_path(param, LOOKUP_FOLLOW, &path);
+        printk("%s: 1\n",MODNAME);
+        ret = kern_path(param, LOOKUP_FOLLOW, &path);
+        printk("%s: 2\n",MODNAME);
+        if(ret < 0){
+            printk("%s: error trying to access the path\n",MODNAME);
+            return 1;
+        }
+        if(path.dentry->d_inode == NULL){
+            printk("%s: path %s does not exist\n",MODNAME, param);
+            return 1;
+        }
         inode_id = path.dentry->d_inode->i_ino;
+        printk("%s: 3\n",MODNAME);
+        printk("%s: inode id %lu\n",MODNAME,inode_id);
+        if(hashset_contains_int(inode_id)){
+            printk("%s: path %s is already protected\n",MODNAME, param);
+            return 1;
+        }
+        printk("%s: 4\n",MODNAME);
         hashset_add_int(inode_id);
+        printk("%s: 5\n",MODNAME);
         printk("%s: path %s is now protected\n",MODNAME, param);
     }
     else{
@@ -173,6 +194,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     char *kpassword;
     struct path path;
     unsigned long inode_id;
+    int ret;
 
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
@@ -189,13 +211,27 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
+        kfree(kpassword);
         return 2;
     }
     spin_unlock(&password_lock);
+    kfree(kpassword);
 
     if(state == REC_OFF || state == REC_ON){
-        kern_path(param, LOOKUP_FOLLOW, &path);
+        ret = kern_path(param, LOOKUP_FOLLOW, &path);
+        if(ret < 0){
+            printk("%s: error trying to access the path\n",MODNAME);
+            return 1;
+        }
+        if(path.dentry->d_inode == NULL){
+            printk("%s: path %s does not exist\n",MODNAME, param);
+            return 1;
+        }
         inode_id = path.dentry->d_inode->i_ino;
+        if(!hashset_contains_int(inode_id)){
+            printk("%s: path %s is not protected\n",MODNAME, param);
+            return 1;
+        }
         hashset_remove_int(inode_id);
         printk("%s: path %s is now unprotected\n",MODNAME, param);
     }else{
@@ -362,21 +398,9 @@ int init_module(void) {
     printk("%s: all new system-calls correctly installed on sys-call table\n",MODNAME);
 
     hashset_init();
-
-    string = "/home/luca/Documents/prova_folder";
-    //hashset_add(string);
-    kern_path(string, LOOKUP_FOLLOW, &path);
-    inode_id = path.dentry->d_inode->i_ino;
-    printk("%s: inode idddd %lu\n",MODNAME,inode_id);
-    hashset_add_int(inode_id);
-    if(hashset_contains_int(inode_id)){
-        printk("%s: inode id is in the hashset\n",MODNAME);
-    }
-    else{
-        printk("%s: inode id is not in the hashset\n",MODNAME);
-    }
-
     register_hooks();
+
+    printk("%s: the module is now ready",MODNAME);
     return 0;
 }
 
