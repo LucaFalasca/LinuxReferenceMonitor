@@ -345,9 +345,6 @@ int init_module(void) {
 
     int i;
     int ret;
-    char *string;
-    struct path path;
-    unsigned long inode_id;
 
     if (strlen(rm_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
@@ -399,8 +396,8 @@ int init_module(void) {
 
     hashset_init();
     register_hooks();
-
-    printk("%s: the module is now ready",MODNAME);
+    
+    printk("%s: the module is now ready\n",MODNAME);
     return 0;
 }
 

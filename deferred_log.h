@@ -1,5 +1,7 @@
 #include "rm_file_protection.h"
 
+#define LOG_PATH "/var/logfs/access_denied_log.csv"
+
 typedef struct _packed_work{
         void* buffer;
         __kernel_time64_t ts;
@@ -91,11 +93,13 @@ void update_access_denied_log(unsigned long data){
     len = snprintf(NULL, 0, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
     if(len > 512){
         printk("%s: [ERROR] buffer too small\n",MODNAME);
+        module_put(THIS_MODULE);
         return;
     }
     printk("%s: len %d\n",MODNAME,len);
     snprintf(output, len, "%lld,%d,%d,%d,%d,%s,%s\n\n", the_task->ts, the_task->tgid, the_task->tid, the_task->uid, the_task->euid, the_task->prog_path, prog_cont_hash);
-    sffs_file = filp_open("/home/luca/LinuxReferenceMonitor/singlefile-FS/mount/access_denied_log.csv", O_WRONLY, 0644);
+    
+    sffs_file = filp_open(LOG_PATH, O_WRONLY, 0644);
     if (IS_ERR(sffs_file)) {
         printk("%s: [ERROR] could not open file with error value %ld\n", MODNAME, PTR_ERR(sffs_file));
     }

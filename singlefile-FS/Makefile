@@ -19,10 +19,10 @@ clean:
 create-fs:
 	dd bs=4096 count=100 if=/dev/zero of=image
 	./singlefilemakefs image
-	mkdir -p mount
+	mkdir -p /var/logfs
 	
 mount-fs:
-	sudo mount -o loop -t singlefilefs image ./mount/
+	sudo mount -o loop -t singlefilefs image /var/logfs/
 
 unmount-fs:
-	sudo umount ./mount/
+	sudo umount /var/logfs
