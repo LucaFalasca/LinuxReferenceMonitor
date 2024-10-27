@@ -26,4 +26,7 @@ Do it only if you don't need anymore the logfile:
 
 
 ## How to use
-Go in the user directory and execute the command ```make run``` for a client.
+Go in the ```/user``` directory and execute the command ```make run``` for a client.
+
+## How to test
+Go in the ```/user``` directory and execute the command ```make run_test``` for running tests.
