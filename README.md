@@ -2,7 +2,12 @@
 Linux Kernel Module (LKM) implementing a reference monitor for file protection.
 
 ## Preliminary steps
-To use this module, you first need to download [this another Linux Kernel Module](https://github.com/FrancescoQuaglia/Linux-sys_call_table-discoverer) that allows the discovery of the system call table address and copy it to the project folder.
+This module use a [submodule](https://github.com/FrancescoQuaglia/Linux-sys_call_table-discoverer)submodule that allows the discovery of the system call table address and copy it to the project folder.
+when you clone the project, to make sure you also include the submodule you can use the command:
+```git clone --recurse-submodules https://github.com/LucaFalasca/LinuxReferenceMonitor.git```
+
+or if you have already cloned the repository you can run this command in the main directory of the project
+```git submodule update --init --recursive```
 
 ## How to mount 
 To mount this module you need to:
