@@ -159,6 +159,10 @@ asmlinkage long sys_protect_path(char *param, char *password){
     kfree(kpassword);
 
     if (state == REC_OFF || state == REC_ON){
+        if(param == NULL){
+            printk("%s: path not inserted\n",MODNAME);
+            return -WRONG_PASSWORD;
+        }
         ret = kern_path(param, LOOKUP_FOLLOW, &path);
         if(ret < 0){
             printk("%s: error trying to access the path\n",MODNAME);
@@ -223,6 +227,10 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     kfree(kpassword);
 
     if(state == REC_OFF || state == REC_ON){
+        if(param == NULL){
+            printk("%s: path not inserted\n",MODNAME);
+            return -WRONG_PATH;
+        }
         ret = kern_path(param, LOOKUP_FOLLOW, &path);
         if(ret < 0){
             printk("%s: error trying to access the path\n",MODNAME);
