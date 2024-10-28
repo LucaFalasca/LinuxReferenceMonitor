@@ -132,6 +132,11 @@ asmlinkage long sys_protect_path(char *param, char *password){
     unsigned long inode_id;
     int ret;
 
+    if(password == NULL){
+        printk("%s: password not inserted\n",MODNAME);
+        return -PASSWORD_NOT_INSERTED;
+    }
+
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
     {
@@ -190,6 +195,11 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     struct path path;
     unsigned long inode_id;
     int ret;
+
+    if(password == NULL){
+        printk("%s: password not inserted\n",MODNAME);
+        return -PASSWORD_NOT_INSERTED;
+    }
 
     kpassword = kmalloc(128, GFP_KERNEL);
     if(copy_from_user(kpassword, password, 128))
