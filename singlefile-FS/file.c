@@ -18,16 +18,16 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
 
     struct buffer_head *bh = NULL;
     struct inode * the_inode = filp->f_inode;
-    uint64_t file_size = the_inode->i_size;
+    uint64_t file_size;
     int ret;
     loff_t offset;
     int block_to_read;//index of the block to be read from device
 
     printk("%s: read operation called with len %ld - and offset %lld (the current file size is %lld)",MOD_NAME, len, *off, file_size);
 
-    //this operation is not synchronized 
-    //*off can be changed concurrently 
-    //add synchronization if you need it for any reason
+    mutex_lock(&mutex);
+    file_size = the_inode->i_size;
+    mutex_unlock(&mutex);
 
     //check that *off is within boundaries
     if (*off >= file_size)
@@ -127,12 +127,12 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
     struct inode *the_inode = filp->f_inode;
     struct buffer_head *bh;
     loff_t *off = &iocb->ki_pos;
-    uint64_t file_size = the_inode->i_size;
+    uint64_t file_size;
     int ret, len, offset, block_to_write;
     size_t write_len = iov_iter_count(from);
     struct onefilefs_inode *FS_specific_inode;
 
-    printk("%s: write operation called with len %ld - and offset %lld (the current file size is %lld)", MOD_NAME, write_len, *off, file_size);
+    //printk("%s: write operation called with len %ld - and offset %lld (the current file size is %lld)", MOD_NAME, write_len, *off, file_size);
     
     bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
     if(!bh){
@@ -141,8 +141,11 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
 	FS_specific_inode = (struct onefilefs_inode*)bh->b_data;
 
     mutex_lock(&mutex);
+    file_size = the_inode->i_size;
     // Aggiorna l'offset all'inizio della scrittura in append (fine del file)
-    *off = file_size;
+    *off = FS_specific_inode->file_size;
+    printk("%s: file size from generic inode is %lld", MOD_NAME, file_size);
+    printk("%s: file size from speicific inode is %lld", MOD_NAME, FS_specific_inode->file_size);
 
     // Gestisci la lunghezza della scrittura in base allo spazio disponibile
     len = min_t(size_t, DEFAULT_BLOCK_SIZE - (*off % DEFAULT_BLOCK_SIZE), write_len);
