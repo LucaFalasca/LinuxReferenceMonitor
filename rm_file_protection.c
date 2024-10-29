@@ -153,6 +153,7 @@ asmlinkage long sys_protect_path(char *param, char *password){
     else{
         printk("%s: password incorrect\n",MODNAME);
         kfree(kpassword);
+        spin_unlock(&password_lock);
         return -WRONG_PASSWORD;
     }
     spin_unlock(&password_lock);
@@ -221,6 +222,7 @@ asmlinkage long sys_unprotect_path(char *param, char *password){
     else{
         printk("%s: password incorrect\n",MODNAME);
         kfree(kpassword);
+        spin_unlock(&password_lock);
         return -WRONG_PASSWORD;
     }
     spin_unlock(&password_lock);
@@ -260,39 +262,66 @@ __SYSCALL_DEFINEx(2, _change_password, char *, old_password, char *, new_passwor
 #else
 asmlinkage long sys_change_password(char *old_password, char *new_password){
 #endif
-    char *kold_password, *knew_password;
+    char *kold_password, *knew_password, *temp_password;
 
     kold_password = kmalloc(128, GFP_KERNEL);
-    knew_password = kmalloc(128, GFP_KERNEL);
+    if(!kold_password){
+        printk("%s: failed to kmalloc", MODNAME);
+        return -GENERIC_ERROR;
+    }
+    
     if(copy_from_user(kold_password, old_password, 128))
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(kold_password);
             return -GENERIC_ERROR;
     }
+    knew_password = kmalloc(128, GFP_KERNEL);
+    if(!knew_password){
+        printk("%s: failed to kmalloc", MODNAME);
+        kfree(kold_password);
+        return -GENERIC_ERROR;
+    }
     if(copy_from_user(knew_password, new_password, 128))
     {
             printk("%s: [ERROR] failed to copy password from userspace\n", MODNAME);
             kfree(knew_password);
+            kfree(kold_password);
             return -GENERIC_ERROR;
     }
     sha256(kold_password, strlen(kold_password), kold_password);
-
+    temp_password = kmalloc(128, GFP_KERNEL);
+    if(!temp_password){
+        printk("%s: failed to kmalloc", MODNAME);
+        kfree(knew_password);
+        kfree(kold_password);
+        return -GENERIC_ERROR;
+    }
+    sha256(knew_password, strlen(knew_password), temp_password);
+    kfree(knew_password);
     spin_lock(&password_lock);
     if (strcmp(kold_password, rm_password) == 0){
         printk("%s: password correct\n",MODNAME);
+        strcpy(rm_password, temp_password);
+        rm_password[65] = '\0';
     }
     else{
         printk("%s: password incorrect\n",MODNAME);
+        kfree(kold_password);
+        kfree(temp_password);
+        spin_unlock(&password_lock);
         return -WRONG_PASSWORD;
     }
     if (strlen(knew_password) == 0){
         printk("%s: password not inserted\n",MODNAME);
+        kfree(kold_password);
+        kfree(temp_password);
+        spin_unlock(&password_lock);
         return -PASSWORD_NOT_INSERTED;
     }
-
-    sha256(knew_password, strlen(knew_password), rm_password);
     spin_unlock(&password_lock);
+    kfree(kold_password);
+    kfree(temp_password);
     printk("%s: password changed\n",MODNAME);
     return 0;
 }
