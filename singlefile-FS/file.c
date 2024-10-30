@@ -144,8 +144,6 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
     file_size = the_inode->i_size;
     // Aggiorna l'offset all'inizio della scrittura in append (fine del file)
     *off = FS_specific_inode->file_size;
-    printk("%s: file size from generic inode is %lld", MOD_NAME, file_size);
-    printk("%s: file size from speicific inode is %lld", MOD_NAME, FS_specific_inode->file_size);
 
     // Gestisci la lunghezza della scrittura in base allo spazio disponibile
     len = min_t(size_t, DEFAULT_BLOCK_SIZE - (*off % DEFAULT_BLOCK_SIZE), write_len);
@@ -182,6 +180,7 @@ ssize_t onefilefs_append(struct kiocb *iocb, struct iov_iter *from) {
     // Aggiorna l'offset e la dimensione del file
     *off += len;
     the_inode->i_size = *off;
+    FS_specific_inode->file_size = *off
 
     // Sincronizza le modifiche
     mark_inode_dirty(the_inode);
