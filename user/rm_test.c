@@ -33,6 +33,14 @@ int main(int argc, char *argv[])
     char *symlink_path = realpath(SYMLINK_PATH, NULL);
     char *hardlink_path = realpath(HARDLINK_PATH, NULL);
     char *folder_inside_path = realpath(FOLDER_INSIDE_PATH, NULL);
+
+    //create hard link file 
+    // ret = link(FILE_PATH, HARDLINK_PATH);
+    // if(ret == -1){
+    //     printf("Error creating hard link\n");
+    //     perror("link");
+    //     exit(1);
+    // }
     
     
     printf("\nFILE TESTS\n");
@@ -111,6 +119,13 @@ int main(int argc, char *argv[])
     // Unprotect the file
     printf("Unprotecting file %s\n", file_path);
     ret = unprotect_path(file_path, password);
+
+    //delete hardlink
+    //ret = unlink(hardlink_path);
+    //if(ret == -1){
+    //    printf("Error deleting hard link\n");
+    //    exit(1);
+    //}
     
     printf("\nFOLDER TESTS\n");
 

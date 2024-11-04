@@ -151,12 +151,22 @@ static int security_file_rename_entry_handler(struct kretprobe_instance *ri, str
     struct inode *new_dir;
     struct inode *old_dir;
     unsigned long inode_id;
-
-
     old_dir = (struct inode *)regs->di;
+    if(old_dir == NULL){
+        return 1;
+    }
     old_dentry = (struct dentry *)regs->si;
+    if(old_dentry == NULL){
+        return 1;
+    }
     new_dir = (struct inode *)regs->dx;
+    if(new_dir == NULL){
+        return 1;
+    }
     new_dentry = (struct dentry *)regs->cx;
+    if(new_dentry == NULL){
+        return 1;
+    }
 
     if(new_dentry->d_inode != NULL){
         inode_id = new_dentry->d_inode->i_ino;
@@ -183,7 +193,6 @@ static int security_file_rename_entry_handler(struct kretprobe_instance *ri, str
         return 0;
     }
 
-
     inode_id = old_dir->i_ino;
 
     if(hashset_contains_int(inode_id)){
@@ -202,18 +211,33 @@ static int security_inode_link_entry_handler(struct kretprobe_instance *ri, stru
     unsigned long file_inode_id;
 
     old_dentry = (struct dentry *)regs->di;
+    if(old_dentry == NULL){
+        return 1;
+    }
     dir = (struct inode *)regs->si;
+    if(dir == NULL){
+        return 1;
+    }
     new_dentry = (struct dentry *)regs->dx;
+    if(new_dentry == NULL){
+        return 1;
+    }
 
     dir_inode_id = dir->i_ino;
     if(hashset_contains_int(dir_inode_id)){
         printk("%s: you can't create a file in a protected directory",MODNAME);
         return 0;
     }
+    if(new_dentry->d_inode == NULL){
+        return 1;
+    }
     file_inode_id = new_dentry->d_inode->i_ino;
     if(hashset_contains_int(file_inode_id)){
         printk("%s: you can't create a protected file",MODNAME);
         return 0;
+    }
+    if(old_dentry->d_inode == NULL){
+        return 1;
     }
     file_inode_id = old_dentry->d_inode->i_ino;
     if(hashset_contains_int(file_inode_id)){
@@ -231,6 +255,7 @@ static int security_inode_dir_ops_entry_handler(struct kretprobe_instance *ri, s
     struct dentry *dentry;
 
     dir = (struct inode *)regs->di;
+    if(dir )
     dentry = (struct dentry *)regs->si;
 
 
